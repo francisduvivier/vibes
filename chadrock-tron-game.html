@@ -1,0 +1,589 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TRON Light Cycles</title>
+<style>
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  background: #000;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100vh;
+  overflow: hidden;
+  font-family: 'Courier New', monospace;
+  color: #0ff;
+}
+
+#gameContainer {
+  position: relative;
+}
+
+canvas {
+  border: 2px solid #0ff;
+  box-shadow: 0 0 30px rgba(0, 255, 255, 0.3), inset 0 0 30px rgba(0, 255, 255, 0.05);
+  background: #0a0a0a;
+}
+
+#hud {
+  display: flex;
+  justify-content: space-between;
+  width: 800px;
+  padding: 15px 0;
+  font-size: 18px;
+  text-transform: uppercase;
+  letter-spacing: 3px;
+}
+
+.p1-score { color: #0ff; text-shadow: 0 0 10px #0ff; }
+.p2-score { color: #f80; text-shadow: 0 0 10px #f80; }
+
+#overlay {
+  position: absolute;
+  top: 0; left: 0;
+  width: 100%; height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.85);
+  z-index: 10;
+}
+
+#overlay h1 {
+  font-size: 64px;
+  letter-spacing: 12px;
+  margin-bottom: 10px;
+  animation: pulse 2s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { text-shadow: 0 0 20px #0ff, 0 0 40px #0ff; }
+  50% { text-shadow: 0 0 40px #0ff, 0 0 80px #0ff, 0 0 120px #0ff; }
+}
+
+#overlay h2 {
+  font-size: 28px;
+  letter-spacing: 6px;
+  margin-bottom: 30px;
+  color: #f80;
+  text-shadow: 0 0 15px #f80;
+}
+
+#overlay .controls {
+  display: flex;
+  gap: 60px;
+  margin-bottom: 30px;
+  font-size: 14px;
+  letter-spacing: 2px;
+}
+
+#overlay .controls div {
+  text-align: center;
+}
+
+#overlay .controls .key {
+  display: inline-block;
+  border: 1px solid #555;
+  padding: 4px 8px;
+  margin: 2px;
+  border-radius: 3px;
+  background: #111;
+  color: #aaa;
+  font-size: 12px;
+}
+
+#startBtn, #restartBtn {
+  padding: 15px 50px;
+  font-size: 20px;
+  font-family: 'Courier New', monospace;
+  background: transparent;
+  color: #0ff;
+  border: 2px solid #0ff;
+  cursor: pointer;
+  letter-spacing: 4px;
+  text-transform: uppercase;
+  transition: all 0.3s;
+}
+
+#startBtn:hover, #restartBtn:hover {
+  background: #0ff;
+  color: #000;
+  box-shadow: 0 0 30px rgba(0, 255, 255, 0.5);
+}
+
+#winnerText {
+  font-size: 24px;
+  letter-spacing: 4px;
+  margin-bottom: 20px;
+}
+
+#countdown {
+  font-size: 80px;
+  color: #0ff;
+  text-shadow: 0 0 30px #0ff;
+}
+
+#minimap {
+  margin-top: 10px;
+  display: flex;
+  gap: 40px;
+  font-size: 12px;
+  letter-spacing: 2px;
+}
+</style>
+</head>
+<body>
+
+<div id="hud">
+  <span class="p1-score">⟨ PLAYER 1 — <span id="score1">0</span> WINS</span>
+  <span class="p2-score">PLAYER 2 — <span id="score2">0</span> WINS ⟩</span>
+</div>
+
+<div id="gameContainer">
+  <canvas id="gameCanvas" width="800" height="600"></canvas>
+  <div id="overlay">
+    <h1>TRON</h1>
+    <h2>LIGHT CYCLES</h2>
+    <div class="controls">
+      <div>
+        <div style="color:#0ff; margin-bottom:8px;">PLAYER 1</div>
+        <div><span class="key">W</span><span class="key">A</span><span class="key">S</span><span class="key">D</span></div>
+        <div style="color:#0ff; margin-top:5px;">↑←↓→ to move</div>
+      </div>
+      <div>
+        <div style="color:#f80; margin-bottom:8px;">PLAYER 2</div>
+        <div><span class="key">↑</span><span class="key">←</span><span class="key">↓</span><span class="key">→</span></div>
+        <div style="color:#f80; margin-top:5;">Arrow Keys</div>
+      </div>
+    </div>
+    <button id="startBtn">START</button>
+  </div>
+</div>
+
+<div id="minimap">
+  <span style="color:#0ff">P1: WASD</span>
+  <span style="color:#f80">P2: ARROWS</span>
+</div>
+
+<script>
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+const overlay = document.getElementById('overlay');
+const startBtn = document.getElementById('startBtn');
+const score1El = document.getElementById('score1');
+const score2El = document.getElementById('score2');
+
+const COLS = 80;
+const ROWS = 60;
+const CELL = canvas.width / COLS;
+
+let grid = [];
+let players = [];
+let gameRunning = false;
+let gameLoop = null;
+let scores = [0, 0];
+let animFrame = 0;
+
+// Directions
+const DIR = {
+  UP: { x: 0, y: -1 },
+  DOWN: { x: 0, y: 1 },
+  LEFT: { x: -1, y: 0 },
+  RIGHT: { x: 1, y: 0 }
+};
+
+function initGrid() {
+  grid = [];
+  for (let r = 0; r < ROWS; r++) {
+    grid[r] = [];
+    for (let c = 0; c < COLS; c++) {
+      grid[r][c] = 0; // 0 = empty, 1 = trail
+    }
+  }
+  // Border walls
+  for (let c = 0; c < COLS; c++) {
+    grid[0][c] = 1;
+    grid[ROWS-1][c] = 1;
+  }
+  for (let r = 0; r < ROWS; r++) {
+    grid[r][0] = 1;
+    grid[r][COLS-1] = 1;
+  }
+}
+
+class Player {
+  constructor(id, x, y, dir, color, glowColor) {
+    this.id = id;
+    this.x = x;
+    this.y = y;
+    this.dir = dir;
+    this.color = color;
+    this.glowColor = glowColor;
+    this.alive = true;
+    this.speed = 3; // cells per frame (lower = faster)
+    this.frameCount = 0;
+    this.trail = [];
+    this.moveQueue = [];
+  }
+
+  setDirection(newDir) {
+    // Prevent 180-degree turns
+    const opposite = {
+      UP: DIR.DOWN,
+      DOWN: DIR.UP,
+      LEFT: DIR.RIGHT,
+      RIGHT: DIR.LEFT
+    };
+    if (opposite[this.dir] !== newDir) {
+      this.moveQueue.push(newDir);
+    }
+  }
+
+  processQueue() {
+    if (this.moveQueue.length > 0) {
+      this.dir = this.moveQueue.shift();
+    }
+  }
+
+  move() {
+    this.x += this.dir.x;
+    this.y += this.dir.y;
+  }
+}
+
+function createPlayers() {
+  players = [
+    new Player(0, 5, Math.floor(ROWS/2) - 2, DIR.RIGHT, '#0ff', 'rgba(0,255,255,'),
+    new Player(1, COLS - 6, Math.floor(ROWS/2) + 2, DIR.LEFT, '#f80', 'rgba(255,136,0,')
+  ];
+}
+
+function resetGame() {
+  initGrid();
+  createPlayers();
+  animFrame = 0;
+}
+
+function drawGrid() {
+  // Draw subtle grid lines
+  ctx.strokeStyle = 'rgba(0, 255, 255, 0.04)';
+  ctx.lineWidth = 0.5;
+  for (let r = 0; r <= ROWS; r++) {
+    ctx.beginPath();
+    ctx.moveTo(0, r * CELL);
+    ctx.lineTo(canvas.width, r * CELL);
+    ctx.stroke();
+  }
+  for (let c = 0; c <= COLS; c++) {
+    ctx.beginPath();
+    ctx.moveTo(c * CELL, 0);
+    ctx.lineTo(c * CELL, canvas.height);
+    ctx.stroke();
+  }
+}
+
+function drawTrail(player) {
+  if (!player.alive) return;
+
+  const px = player.x * CELL;
+  const py = player.y * CELL;
+  const half = CELL / 2;
+
+  // Glow
+  ctx.shadowColor = player.color;
+  ctx.shadowBlur = 15;
+  ctx.fillStyle = player.color;
+  ctx.fillRect(px + 1, py + 1, CELL - 2, CELL - 2);
+
+  // Inner bright core
+  ctx.shadowBlur = 0;
+  ctx.fillStyle = '#fff';
+  ctx.globalAlpha = 0.6;
+  ctx.fillRect(px + CELL * 0.25, py + CELL * 0.25, CELL * 0.5, CELL * 0.5);
+  ctx.globalAlpha = 1;
+
+  ctx.shadowBlur = 0;
+}
+
+function drawBorder() {
+  // Animated border glow
+  const t = animFrame * 0.05;
+  const alpha = 0.3 + 0.15 * Math.sin(t);
+
+  ctx.shadowColor = `rgba(0, 255, 255, ${alpha})`;
+  ctx.shadowBlur = 20;
+  ctx.strokeStyle = `rgba(0, 255, 255, ${alpha})`;
+  ctx.lineWidth = 2;
+  ctx.strokeRect(1, 1, canvas.width - 2, canvas.height - 2);
+  ctx.shadowBlur = 0;
+}
+
+function checkCollision(player) {
+  if (player.x < 0 || player.x >= COLS || player.y < 0 || player.y >= ROWS) {
+    return true;
+  }
+  return grid[player.y][player.x] === 1;
+}
+
+function endGame(winner) {
+  gameRunning = false;
+  clearInterval(gameLoop);
+
+  if (winner === 0) scores[0]++;
+  else if (winner === 1) scores[1]++;
+  else scores[0]++; scores[1]++; // draw
+
+  score1El.textContent = scores[0];
+  score2El.textContent = scores[1];
+
+  let winnerText = '';
+  if (winner === 0) winnerText = 'PLAYER 1 WINS';
+  else if (winner === 1) winnerText = 'PLAYER 2 WINS';
+  else winnerText = 'DRAW';
+
+  overlay.innerHTML = `
+    <h1>GAME OVER</h1>
+    <h2 style="color:${winner === 0 ? '#0ff' : winner === 1 ? '#f80' : '#fff'}; margin-bottom:10px;">${winnerText}</h2>
+    <div style="color:#aaa; margin-bottom:20px; letter-spacing:2px;">
+      SCORE — P1: ${scores[0]} &nbsp;|&nbsp; P2: ${scores[1]}
+    </div>
+    <button id="restartBtn" onclick="restartGame()">PLAY AGAIN</button>
+  `;
+  overlay.style.display = 'flex';
+}
+
+function update() {
+  animFrame++;
+
+  // Process direction queues
+  players.forEach(p => p.processQueue());
+
+  // Move players
+  players.forEach(p => {
+    p.move();
+    p.frameCount++;
+  });
+
+  // Check collisions
+  const collisions = [false, false];
+  let headOnHead = false;
+
+  // Check if either player hits a wall/trail
+  for (let i = 0; i < players.length; i++) {
+    const p = players[i];
+    if (p.alive && checkCollision(p)) {
+      collisions[i] = true;
+    }
+  }
+
+  // Check head-on-head collision
+  if (players[0].alive && players[1].alive &&
+      players[0].x === players[1].x &&
+      players[0].y === players[1].y) {
+    headOnHead = true;
+  }
+
+  // Mark trails
+  for (let i = 0; i < players.length; i++) {
+    const p = players[i];
+    if (p.alive && !checkCollision(p)) {
+      grid[p.y][p.x] = 1;
+      p.trail.push({ x: p.x, y: p.y });
+    }
+  }
+
+  // Determine winner
+  if (headOnHead) {
+    players[0].alive = false;
+    players[1].alive = false;
+    endGame(-1);
+    return;
+  }
+
+  if (collisions[0] && !collisions[1]) {
+    players[0].alive = false;
+    endGame(1);
+    return;
+  }
+
+  if (collisions[1] && !collisions[0]) {
+    players[1].alive = false;
+    endGame(0);
+    return;
+  }
+
+  if (collisions[0] && collisions[1]) {
+    players[0].alive = false;
+    players[1].alive = false;
+    endGame(-1);
+    return;
+  }
+
+  // Check if both alive but no space left
+  let emptyCount = 0;
+  for (let r = 1; r < ROWS - 1; r++) {
+    for (let c = 1; c < COLS - 1; c++) {
+      if (grid[r][c] === 0) emptyCount++;
+    }
+  }
+  if (emptyCount === 0) {
+    endGame(-1);
+    return;
+  }
+}
+
+function render() {
+  // Clear
+  ctx.fillStyle = '#0a0a0a';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  drawGrid();
+  drawBorder();
+
+  // Draw existing trails
+  for (let r = 1; r < ROWS - 1; r++) {
+    for (let c = 1; c < COLS - 1; c++) {
+      if (grid[r][c] === 1) {
+        // Find which player owns this cell
+        let ownedBy = -1;
+        for (let i = 0; i < players.length; i++) {
+          if (players[i].trail.some(t => t.x === c && t.y === r)) {
+            ownedBy = i;
+            break;
+          }
+        }
+        const color = ownedBy >= 0 ? players[ownedBy].color : '#333';
+        const px = c * CELL;
+        const py = r * CELL;
+
+        ctx.shadowColor = color;
+        ctx.shadowBlur = 8;
+        ctx.fillStyle = color;
+        ctx.fillRect(px + 0.5, py + 0.5, CELL - 1, CELL - 1);
+        ctx.shadowBlur = 0;
+      }
+    }
+  }
+
+  // Draw player heads
+  players.forEach(p => {
+    if (p.alive) {
+      const px = p.x * CELL;
+      const py = p.y * CELL;
+      const half = CELL / 2;
+
+      // Outer glow
+      ctx.shadowColor = p.color;
+      ctx.shadowBlur = 20;
+      ctx.fillStyle = p.color;
+      ctx.beginPath();
+      ctx.arc(px + half, py + half, half - 1, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Inner core
+      ctx.shadowBlur = 0;
+      ctx.fillStyle = '#fff';
+      ctx.beginPath();
+      ctx.arc(px + half, py + half, half * 0.45, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Direction indicator
+      ctx.strokeStyle = '#fff';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      const dx = p.dir.x * half * 0.8;
+      const dy = p.dir.y * half * 0.8;
+      ctx.moveTo(px + half, py + half);
+      ctx.lineTo(px + half + dx, py + half + dy);
+      ctx.stroke();
+    }
+  });
+
+  // Scanline effect
+  ctx.fillStyle = 'rgba(0,0,0,0.03)';
+  for (let y = 0; y < canvas.height; y += 3) {
+    ctx.fillRect(0, y, canvas.width, 1);
+  }
+}
+
+function gameStep() {
+  update();
+  render();
+}
+
+function startGame() {
+  resetGame();
+  overlay.style.display = 'none';
+  gameRunning = true;
+
+  // Countdown
+  let count = 3;
+  overlay.innerHTML = `
+    <div id="countdown">${count}</div>
+  `;
+  overlay.style.display = 'flex';
+
+  const countInterval = setInterval(() => {
+    count--;
+    if (count > 0) {
+      document.getElementById('countdown').textContent = count;
+    } else if (count === 0) {
+      document.getElementById('countdown').textContent = 'GO!';
+      document.getElementById('countdown').style.color = '#f80';
+    } else {
+      clearInterval(countInterval);
+      overlay.style.display = 'none';
+      gameLoop = setInterval(gameStep, 30);
+    }
+  }, 400);
+}
+
+function restartGame() {
+  startGame();
+}
+
+// Input handling
+document.addEventListener('keydown', (e) => {
+  if (!gameRunning) return;
+
+  const p1 = players[0];
+  const p2 = players[1];
+
+  switch (e.key) {
+    case 'w': case 'W': p1.setDirection(DIR.UP); break;
+    case 's': case 'S': p1.setDirection(DIR.DOWN); break;
+    case 'a': case 'A': p1.setDirection(DIR.LEFT); break;
+    case 'd': case 'D': p1.setDirection(DIR.RIGHT); break;
+    case 'ArrowUp': p2.setDirection(DIR.UP); e.preventDefault(); break;
+    case 'ArrowDown': p2.setDirection(DIR.DOWN); e.preventDefault(); break;
+    case 'ArrowLeft': p2.setDirection(DIR.LEFT); e.preventDefault(); break;
+    case 'ArrowRight': p2.setDirection(DIR.RIGHT); e.preventDefault(); break;
+  }
+});
+
+// Prevent scrolling with arrow keys
+window.addEventListener('keydown', (e) => {
+  if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space'].includes(e.code)) {
+    e.preventDefault();
+  }
+});
+
+startBtn.addEventListener('click', startGame);
+
+// Initial render
+initGrid();
+createPlayers();
+render();
+</script>
+
+</body>
+</html>
